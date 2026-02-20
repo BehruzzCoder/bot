@@ -21,7 +21,7 @@ from telegram.ext import (
 )
 
 # ===================== SETTINGS =====================
-BOT_TOKEN = "8559290931:AAFOHhrZsRKqWTd5LTlq6Lrj9qgrRHdK4MM"
+BOT_TOKEN = "8302225372:AAE1aLrBi15j066O5eAWPyIb-PkRa_Zw_vQ"
 ADMIN_ID = 8013467870
 
 QUESTION_TIMEOUT_SEC = 60   # har savolga 60 sekund
@@ -952,4 +952,5 @@ async def main():
     await app.shutdown()
 
 if __name__ == "__main__":
+
     asyncio.run(main())
