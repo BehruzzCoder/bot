@@ -2,31 +2,22 @@ import logging
 import re
 import asyncio
 import signal
-import io
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Document
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
-    ContextTypes,
-    filters,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ConversationHandler, ContextTypes, filters,
 )
 
 # ===================== SETTINGS =====================
-BOT_TOKEN = "8302225372:AAE1aLrBi15j066O5eAWPyIb-PkRa_Zw_vQ"  # YANGI TOKEN QO'YING
-ADMIN_ID = 8013467870
-
-QUESTION_TIMEOUT_SEC = 120   # har savolga 2 daqiqa
-TICK_SEC = 10                # har 10 sekundda timer update
-
+BOT_TOKEN = "8302225372:AAE1aLrBi15j066O5eAWPyIb-PkRa_Zw_vQ"
+ADMIN_ID = 8411295928
+QUESTION_TIMEOUT_SEC = 40
+TICK_SEC = 3
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 EXCEL_PATH = DATA_DIR / "applications.xlsx"
@@ -40,26 +31,16 @@ logger = logging.getLogger(__name__)
 
 # ===================== STATES =====================
 (SAVOL1, SAVOL2, SAVOL3, SAVOL4, SAVOL5, SAVOL6,
- ISM_FAMILIYA, YOSH, SHAHAR, TEL, OXIRGI_ISH, SOHALAR, TAJRIBA_YIL, VAZIFALAR, BOSHlash, MAOSH) = range(16)
+ ISM_FAMILIYA, YOSH, SHAHAR, TEL, OXIRGI_ISH,
+ SOHALAR, TAJRIBA_YIL, VAZIFALAR, BOSHlash, MAOSH) = range(16)
 
 # ===================== GLOBALS =====================
-user_scores = {}  # closer score (0..18)
+user_scores = {}
 
 REGIONS = [
-    "Toshkent",
-    "Samarqand",
-    "Farg'ona",
-    "Andijon",
-    "Namangan",
-    "Buxoro",
-    "Xorazm",
-    "Qashqadaryo",
-    "Surxondaryo",
-    "Jizzax",
-    "Sirdaryo",
-    "Navoiy",
-    "Qoraqalpog'iston",
-    "Boshqa",
+    "Toshkent", "Samarqand", "Farg'ona", "Andijon", "Namangan",
+    "Buxoro", "Xorazm", "Qashqadaryo", "Surxondaryo", "Jizzax",
+    "Sirdaryo", "Navoiy", "Qoraqalpog'iston", "Boshqa",
 ]
 
 ABOUT_TEXT = (
@@ -72,23 +53,12 @@ ABOUT_TEXT = (
 
 # ===================== EXCEL =====================
 EXCEL_HEADERS = [
-    "timestamp",
-    "status",
-    "tg_user_id",
-    "tg_username",
-    "ism_familiya",
-    "yosh",
-    "shahar",
-    "tel",
-    "oxirgi_ish",
-    "sohalar",
-    "tajriba_yil",
-    "vazifalar",
-    "boshlash",
-    "maosh",
-    "interview_date",
-    "closer_score",
+    "timestamp", "status", "tg_user_id", "tg_username",
+    "ism_familiya", "yosh", "shahar", "tel", "oxirgi_ish",
+    "sohalar", "tajriba_yil", "vazifalar", "boshlash",
+    "maosh", "interview_date", "closer_score",
 ]
+
 
 def ensure_excel_file():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,12 +68,12 @@ def ensure_excel_file():
     ws = wb.active
     ws.title = "DATA"
     ws.append(EXCEL_HEADERS)
-    # Header styling
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
     wb.save(EXCEL_PATH)
+
 
 def excel_append_row(row: list):
     try:
@@ -117,13 +87,12 @@ def excel_append_row(row: list):
         logger.exception("Excel append error: %s", e)
         return False
 
+
 async def send_excel_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin ga Excel faylni yuborish"""
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
         await update.message.reply_text("⛔️ Siz admin emassiz!")
         return
-    
     try:
         ensure_excel_file()
         with open(EXCEL_PATH, "rb") as f:
@@ -137,6 +106,7 @@ async def send_excel_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.exception("Excel send error: %s", e)
         await update.message.reply_text(f"❌ Xato: {str(e)}")
 
+
 def get_applications_count():
     try:
         ensure_excel_file()
@@ -146,31 +116,40 @@ def get_applications_count():
     except:
         return 0
 
+
 # ===================== LOCK / EXPIRE =====================
 def _locks(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.application.bot_data.setdefault("locks", {})
 
+
 def _expired(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.application.bot_data.setdefault("expired", {})
+
 
 def is_locked(context: ContextTypes.DEFAULT_TYPE, uid: int) -> bool:
     lock_until = _locks(context).get(uid)
     return bool(lock_until and date.today() < lock_until)
 
-def lock_until_tomorrow(context: ContextTypes.DEFAULT_TYPE, uid: int):
-    _locks(context)[uid] = date.today() + timedelta(days=1)
+
+def lock_forever(context: ContextTypes.DEFAULT_TYPE, uid: int):
+    """Foydalanuvchini ABADIY bloklash (bot ishlayotgan vaqtda)"""
+    _locks(context)[uid] = date.max  # 9999-12-31
+
 
 def set_expired(context: ContextTypes.DEFAULT_TYPE, uid: int, val: bool):
     _expired(context)[uid] = val
 
+
 def is_expired(context: ContextTypes.DEFAULT_TYPE, uid: int) -> bool:
     return bool(_expired(context).get(uid, False))
+
 
 def guard_expired(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     uid = update.effective_user.id if update.effective_user else None
     if not uid:
         return True
     return is_expired(context, uid)
+
 
 # ===================== TIMER =====================
 def cancel_timer(user_data: dict):
@@ -179,85 +158,67 @@ def cancel_timer(user_data: dict):
         task.cancel()
     user_data["timer_task"] = None
 
-async def _safe_edit(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, text: str, reply_markup):
+
+async def _safe_edit(context, chat_id, message_id, text, reply_markup):
     try:
         await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=reply_markup,
+            chat_id=chat_id, message_id=message_id,
+            text=text, reply_markup=reply_markup,
         )
     except Exception:
         pass
 
-async def timer_task_fn(
-    context: ContextTypes.DEFAULT_TYPE,
-    uid: int,
-    chat_id: int,
-    message_id: int,
-    base_text: str,
-    reply_markup,
-):
+
+async def timer_task_fn(context, uid, chat_id, message_id, base_text, reply_markup):
     left = QUESTION_TIMEOUT_SEC
     try:
         while left > 0:
             await _safe_edit(
-                context,
-                chat_id,
-                message_id,
-                base_text + f"\n\n⏳ Qoldi: {left}s",
-                reply_markup,
+                context, chat_id, message_id,
+                base_text + f"\n\n⏳ Qoldi: {left}s", reply_markup,
             )
             await asyncio.sleep(TICK_SEC)
             left -= TICK_SEC
-
-        if is_expired(context, uid):
-            return
+            if is_expired(context, uid):
+                return
 
         set_expired(context, uid, True)
-        lock_until_tomorrow(context, uid)
+        lock_forever(context, uid)
 
         try:
-            await context.bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id, message_id=message_id, reply_markup=None
+            )
         except Exception:
             pass
 
         ud = context.application.user_data.get(uid, {}) if hasattr(context.application, "user_data") else {}
         closer_score = user_scores.get(uid, 0)
-
         row = [
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "TIMEOUT",
-            str(uid),
-            ud.get("username", ""),
-            ud.get("ism_familiya", ""),
-            ud.get("yosh", ""),
-            ud.get("shahar", ""),
-            ud.get("tel", ""),
-            ud.get("oxirgi_ish", ""),
-            ud.get("sohalar", ""),
-            ud.get("tajriba_yil", ""),
-            ud.get("vazifalar", ""),
-            ud.get("boshlash", ""),
-            ud.get("maosh", ""),
-            ud.get("interview_date", ""),
-            f"{closer_score}/18",
+            "TIMEOUT", str(uid), ud.get("username", ""),
+            ud.get("ism_familiya", ""), ud.get("yosh", ""),
+            ud.get("shahar", ""), ud.get("tel", ""),
+            ud.get("oxirgi_ish", ""), ud.get("sohalar", ""),
+            ud.get("tajriba_yil", ""), ud.get("vazifalar", ""),
+            ud.get("boshlash", ""), ud.get("maosh", ""),
+            ud.get("interview_date", ""), f"{closer_score}/18",
         ]
         excel_append_row(row)
-
         await context.bot.send_message(
             chat_id=chat_id,
-            text="⏰ Vaqt tugadi! Test bekor qilindi.\n\nErtaga yana urinib ko'ring. /start"
+            text="⏰ Vaqt tugadi! Test bekor qilindi.\n\n⛔️ Qayta urinish mumkin emas."
         )
-
     except asyncio.CancelledError:
         return
 
-def start_timer(context: ContextTypes.DEFAULT_TYPE, user_data: dict, uid: int, chat_id: int, message_id: int, base_text: str, reply_markup):
+
+def start_timer(context, user_data, uid, chat_id, message_id, base_text, reply_markup):
     cancel_timer(user_data)
     user_data["timer_task"] = asyncio.create_task(
         timer_task_fn(context, uid, chat_id, message_id, base_text, reply_markup)
     )
+
 
 # ===================== HELPERS =====================
 def build_regions_keyboard():
@@ -271,6 +232,7 @@ def build_regions_keyboard():
         rows.append(row)
     return InlineKeyboardMarkup(rows)
 
+
 def normalize_uz_phone(text: str) -> str | None:
     digits = re.sub(r"\D", "", text.strip())
     if digits.startswith("998") and len(digits) == 12:
@@ -278,6 +240,7 @@ def normalize_uz_phone(text: str) -> str | None:
     if len(digits) == 9:
         return "+998" + digits
     return None
+
 
 def interview_date_keyboard():
     d1 = date.today() + timedelta(days=1)
@@ -290,14 +253,21 @@ def interview_date_keyboard():
     ]
     return InlineKeyboardMarkup(rows)
 
+
 # ===================== START =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if is_locked(context, uid):
+        await update.message.reply_text("⛔️ Siz allaqachon testdan o'tgansiz.\nQayta urinish mumkin emas.")
+        return ConversationHandler.END
+
     keyboard = [[InlineKeyboardButton("🚀 TESTNI BOSHLASH", callback_data="start_test")]]
     await update.message.reply_text(
         ABOUT_TEXT + "\n\n🚀 Testni boshlash uchun tugmani bosing:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return ConversationHandler.END
+
 
 # ===================== CLOSER TEST (6 SAVOL) =====================
 async def start_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,7 +276,7 @@ async def start_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
 
     if is_locked(context, uid):
-        await query.edit_message_text("⛔️ Bugun urinish tugagan.\nErtaga yana urinib ko'ring. /start")
+        await query.edit_message_text("⛔️ Siz allaqachon testdan o'tgansiz.\nQayta urinish mumkin emas.")
         return ConversationHandler.END
 
     context.user_data.clear()
@@ -326,6 +296,7 @@ async def start_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL1
 
+
 async def savol1_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
@@ -334,6 +305,7 @@ async def savol1_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
     cancel_timer(context.user_data)
 
+    # TO'G'RI JAVOB: s1_a (3 ball)
     if query.data == "s1_a":
         user_scores[uid] += 3
     elif query.data == "s1_b":
@@ -353,6 +325,7 @@ async def savol1_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL2
 
+
 async def savol2_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
@@ -361,12 +334,14 @@ async def savol2_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
     cancel_timer(context.user_data)
 
+    # TO'G'RI JAVOB: s2_b (3 ball)
     if query.data == "s2_b":
         user_scores[uid] += 3
     elif query.data == "s2_d":
         user_scores[uid] += 2
     elif query.data == "s2_a":
         user_scores[uid] += 1
+    # s2_c - 0 ball
 
     keyboard = [
         [InlineKeyboardButton("10+ sotuv", callback_data="s3_a")],
@@ -379,6 +354,7 @@ async def savol2_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL3
 
+
 async def savol3_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
@@ -387,10 +363,12 @@ async def savol3_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
     cancel_timer(context.user_data)
 
+    # TO'G'RI JAVOB: s3_a (3 ball)
     if query.data == "s3_a":
         user_scores[uid] += 3
     elif query.data == "s3_b":
         user_scores[uid] += 2
+    # s3_c - 0 ball
 
     keyboard = [
         [InlineKeyboardButton("Ha", callback_data="s4_a")],
@@ -402,6 +380,7 @@ async def savol3_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL4
 
+
 async def savol4_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
@@ -410,6 +389,7 @@ async def savol4_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = query.from_user.id
     cancel_timer(context.user_data)
 
+    # TO'G'RI JAVOB: s4_a (3 ball)
     if query.data == "s4_a":
         user_scores[uid] += 3
     else:
@@ -425,27 +405,33 @@ async def savol4_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL5
 
+
 async def savol5_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
+    uid = query.from_user.id
     cancel_timer(context.user_data)
 
-    if query.data == "s5_b":
-        await query.edit_message_text("❌ Yosh mos emas.")
+    # TO'G'RI JAVOB: s5_a (3 ball)
+    if query.data == "s5_a":
+        user_scores[uid] += 3
+    else:
+        lock_forever(context, uid)
+        await query.edit_message_text("❌ Yosh mos emas.\n\n⛔️ Qayta urinish mumkin emas.")
         return ConversationHandler.END
 
     rm = interview_date_keyboard()
     base_text = "❓ SAVOL 6/6\n\nSuhbat sanasini tanlang:"
     await query.edit_message_text(base_text + f"\n\n⏳ Qoldi: {QUESTION_TIMEOUT_SEC}s", reply_markup=rm)
-    start_timer(context, context.user_data, query.from_user.id, query.message.chat_id, query.message.message_id, base_text, rm)
+    start_timer(context, context.user_data, uid, query.message.chat_id, query.message.message_id, base_text, rm)
     return SAVOL6
+
 
 async def savol6_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
-
     query = update.callback_query
     await query.answer()
     uid = query.from_user.id
@@ -461,18 +447,22 @@ async def savol6_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         context.user_data["interview_date"] = ""
 
+    # TO'G'RI JAVOB: har qanday sanani tanlasa (3 ball)
     user_scores[uid] += 3
     score = user_scores.get(uid, 0)
 
+    # BALL KO'RSATMAYMIZ - faqat keyingi bosqichga o'tamiz
     if score >= 12:
-        await query.edit_message_text(f"🎉 Tabriklaymiz! Ball: {score}/18\n\n✍️ Ismingiz va familiyangizni kiriting:")
+        await query.edit_message_text(f"🎉 Tabriklaymiz! Siz keyingi bosqichga o'tdingiz.\n\n✍️ Ismingiz va familiyangizni kiriting:")
         return ISM_FAMILIYA
     elif score >= 8:
-        await query.edit_message_text(f"Ball: {score}/18\n\n✍️ Ismingiz va familiyangizni kiriting:")
+        await query.edit_message_text(f"✍️ Ismingiz va familiyangizni kiriting:")
         return ISM_FAMILIYA
     else:
-        await query.edit_message_text(f"❌ Hozircha mos emas.\n\nBall: {score}/18")
+        lock_forever(context, uid)
+        await query.edit_message_text(f"❌ Hozircha mos emas.\n\n⛔️ Qayta urinish mumkin emas.")
         return ConversationHandler.END
+
 
 # ===================== ANKETA SAVOLLARI =====================
 async def get_ism_familiya(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -481,6 +471,7 @@ async def get_ism_familiya(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["ism_familiya"] = update.message.text.strip()
     await update.message.reply_text("🎂 Necha yoshdasiz?")
     return YOSH
+
 
 async def get_yosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
@@ -493,20 +484,20 @@ async def get_yosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📍 Qaysi shahardansiz?", reply_markup=build_regions_keyboard())
     return SHAHAR
 
+
 async def get_shahar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     cancel_timer(context.user_data)
-
     if not query.data.startswith("reg:"):
         return SHAHAR
-
     region = query.data.split("reg:", 1)[1].strip()
     context.user_data["shahar"] = region
     await query.edit_message_text("📞 Telefon raqamingizni kiriting:\nMisol: +998901234567 yoki 901234567")
     return TEL
+
 
 async def get_tel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
@@ -519,12 +510,14 @@ async def get_tel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💼 Oxirgi ish joyingiz va lavozimingizni yozing:")
     return OXIRGI_ISH
 
+
 async def get_oxirgi_ish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
     context.user_data["oxirgi_ish"] = update.message.text.strip()
     await update.message.reply_text("🎯 Qaysi sohalarda ishlagansiz?")
     return SOHALAR
+
 
 async def get_sohalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
@@ -533,12 +526,14 @@ async def get_sohalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📊 Necha yillik ish tajribangiz bor?")
     return TAJRIBA_YIL
 
+
 async def get_tajriba_yil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
     context.user_data["tajriba_yil"] = update.message.text.strip()
     await update.message.reply_text("📝 Oxirgi ish joyingizdagi asosiy vazifalaringizni yozing:")
     return VAZIFALAR
+
 
 async def get_vazifalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
@@ -547,6 +542,7 @@ async def get_vazifalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📅 Qachondan ish boshlay olasiz?")
     return BOSHlash
 
+
 async def get_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
@@ -554,20 +550,18 @@ async def get_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💰 Maosh bo'yicha kutganingizni yozing:")
     return MAOSH
 
+
 async def get_maosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if guard_expired(update, context):
         return ConversationHandler.END
     context.user_data["maosh"] = update.message.text.strip()
-    
-    # FINISH - save to Excel
+
     uid = update.effective_user.id
     closer_score = user_scores.get(uid, 0)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     row = [
-        now,
-        "COMPLETED",
-        str(uid),
+        now, "COMPLETED", str(uid),
         context.user_data.get("username", ""),
         context.user_data.get("ism_familiya", ""),
         context.user_data.get("yosh", ""),
@@ -584,22 +578,24 @@ async def get_maosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     ok = excel_append_row(row)
 
-    # Admin ga xabar
+    # ✅ Foydalanuvchini ABADIY bloklash
+    lock_forever(context, uid)
+
     admin_msg = (
         "🆕 YANGI ARIZA\n\n"
         f"⏱ {now}\n"
-        f"👤 {context.user_data.get('ism_familiya','-')}\n"
-        f"🎂 {context.user_data.get('yosh','-')} yosh\n"
-        f"📍 {context.user_data.get('shahar','-')}\n"
-        f"📞 {context.user_data.get('tel','-')}\n"
-        f"💼 Oxirgi ish: {context.user_data.get('oxirgi_ish','-')}\n"
-        f"🎯 Sohalar: {context.user_data.get('sohalar','-')}\n"
-        f"📊 Tajriba: {context.user_data.get('tajriba_yil','-')}\n"
-        f"📝 Vazifalar: {context.user_data.get('vazifalar','-')}\n"
-        f"📅 Boshlash: {context.user_data.get('boshlash','-')}\n"
-        f"💰 Maosh: {context.user_data.get('maosh','-')}\n"
-        f"🗓 Suhbat: {context.user_data.get('interview_date','-')}\n"
-        f"👤 @{context.user_data.get('username','')}\n"
+        f"👤 {context.user_data.get('ism_familiya', '-')}\n"
+        f"🎂 {context.user_data.get('yosh', '-')} yosh\n"
+        f"📍 {context.user_data.get('shahar', '-')}\n"
+        f"📞 {context.user_data.get('tel', '-')}\n"
+        f"💼 Oxirgi ish: {context.user_data.get('oxirgi_ish', '-')}\n"
+        f"🎯 Sohalar: {context.user_data.get('sohalar', '-')}\n"
+        f"📊 Tajriba: {context.user_data.get('tajriba_yil', '-')}\n"
+        f"📝 Vazifalar: {context.user_data.get('vazifalar', '-')}\n"
+        f"📅 Boshlash: {context.user_data.get('boshlash', '-')}\n"
+        f"💰 Maosh: {context.user_data.get('maosh', '-')}\n"
+        f"🗓 Suhbat: {context.user_data.get('interview_date', '-')}\n"
+        f"👤 @{context.user_data.get('username', '')}\n"
         f"⭐️ Closer: {closer_score}/18\n"
         f"🆔 ID: {uid}\n\n"
         f"📄 Excel: {'✅' if ok else '❌'}"
@@ -609,11 +605,13 @@ async def get_maosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("Admin send error: %s", e)
 
+    # ENDI BALLNI KO'RSATAMIZ (oxirida)
     await update.message.reply_text(
-        "✅ Arizangiz qabul qilindi!\n\n"
-        "Tez orada siz bilan bog'lanishadi."
+        f"✅ Arizangiz qabul qilindi!\n\n"
+        f"Tez orada siz bilan bog'lanishadi."
     )
     return ConversationHandler.END
+
 
 # ===================== CANCEL =====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -621,22 +619,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bekor qilindi. /start bosib qaytadan boshlang.")
     return ConversationHandler.END
 
+
 # ===================== RUN =====================
 async def _wait_for_stop_signal():
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, stop_event.set)
         except NotImplementedError:
             pass
-
     await stop_event.wait()
+
 
 async def main():
     ensure_excel_file()
-
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
@@ -648,7 +645,6 @@ async def main():
             SAVOL4: [CallbackQueryHandler(savol4_handler, pattern="^s4_[ab]$")],
             SAVOL5: [CallbackQueryHandler(savol5_handler, pattern="^s5_[ab]$")],
             SAVOL6: [CallbackQueryHandler(savol6_handler, pattern="^int:")],
-
             ISM_FAMILIYA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ism_familiya)],
             YOSH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_yosh)],
             SHAHAR: [CallbackQueryHandler(get_shahar_callback, pattern="^reg:")],
@@ -672,14 +668,11 @@ async def main():
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
-
     await _wait_for_stop_signal()
-
     await app.updater.stop()
     await app.stop()
     await app.shutdown()
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-
