@@ -67,7 +67,7 @@ ABOUT_TEXT = (
     "💼 High-Ticket Closer testi\n"
     "⏰ 10:00–18:00 | 🍽 13:00–14:00 (o'z hisobidan)\n"
     "📆 Haftada 6 kun | 🎯 19–38 yosh\n"
-    "💰 Har sotuvdan 5% daromad"
+    "💰 Har sotuvdan 5% gacha daromad"
 )
 
 # ===================== EXCEL =====================
@@ -611,7 +611,6 @@ async def get_maosh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "✅ Arizangiz qabul qilindi!\n\n"
-        f"⭐️ Closer ball: {closer_score}/18\n\n"
         "Tez orada siz bilan bog'lanishadi."
     )
     return ConversationHandler.END
@@ -682,4 +681,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
