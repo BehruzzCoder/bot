@@ -15,7 +15,7 @@ from telegram.ext import (
 
 # ===================== SETTINGS =====================
 BOT_TOKEN = "8302225372:AAE1aLrBi15j066O5eAWPyIb-PkRa_Zw_vQ"
-ADMIN_ID = 8411295928
+ADMIN_ID = 8013467870
 QUESTION_TIMEOUT_SEC = 40
 TICK_SEC = 3
 BASE_DIR = Path(__file__).resolve().parent
@@ -676,3 +676,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
