@@ -21,7 +21,7 @@ from telegram.ext import (
 )
 
 # ===================== SETTINGS =====================
-BOT_TOKEN = "8559290931:AAFOHhrZsRKqWTd5LTlq6Lrj9qgrRHdK4MM"  # YANGI TOKEN QO'YING
+BOT_TOKEN = "8302225372:AAE1aLrBi15j066O5eAWPyIb-PkRa_Zw_vQ"  # YANGI TOKEN QO'YING
 ADMIN_ID = 8013467870
 
 QUESTION_TIMEOUT_SEC = 120   # har savolga 2 daqiqa
@@ -682,3 +682,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
